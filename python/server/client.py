@@ -9,7 +9,7 @@ import json
 
 def to_socketio(event_name, payload):
     message = {'name': event_name, 'args': [json.dumps(payload)]}
-    return "5:::" + json.dumps(message)
+    return f"5:::{json.dumps(message)}"
 
 def from_socketio(message):
     message = message.replace('5:::', '')

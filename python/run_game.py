@@ -475,21 +475,14 @@ class Tank:
         else:
             other_points = self.other_tank.points
         adjust = (self.points - other_points) / self.points_to_crush * self.size.y
-        if adjust > 0:
-            adjust = 0
-        if self.game_over:
-            adjust = 0
+        adjust = 0 if self.game_over else min(adjust, 0)
         target_y = self.size.y * 1.5 + adjust
 
         direction = sign(target_y - self.ceiling.body.position.y)
         amount = self.max_ceiling_delta * dt
         new_y = self.ceiling.body.position.y + amount * direction
         new_sign = sign(target_y - new_y)
-        if direction is -new_sign:
-            # close enough to just set
-            self.ceiling.body.position.y = target_y
-        else:
-            self.ceiling.body.position.y = new_y
+        self.ceiling.body.position.y = target_y if direction is -new_sign else new_y
 
     def init_man(self, pos=None, vel=None):
         if pos is None:

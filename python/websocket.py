@@ -112,10 +112,7 @@ def _parse_url(url):
         hostname = parsed.hostname
     else:
         raise ValueError("hostname is invalid")
-    port = 0
-    if parsed.port:
-        port = parsed.port
-
+    port = parsed.port if parsed.port else 0
     is_secure = False
     if scheme == "ws":
         if not port:
@@ -125,15 +122,11 @@ def _parse_url(url):
         if not port:
             port  = 443
     else:
-        raise ValueError("scheme %s is invalid" % scheme)
+        raise ValueError(f"scheme {scheme} is invalid")
 
-    if parsed.path:
-        resource = parsed.path
-    else:
-        resource = "/"
-
+    resource = parsed.path if parsed.path else "/"
     if parsed.query:
-        resource += "?" + parsed.query
+        resource += f"?{parsed.query}"
 
     return (hostname, port, resource, is_secure)
 
@@ -191,11 +184,7 @@ class _SSLSocketWrapper(object):
 
 _BOOL_VALUES = (0, 1)
 def _is_bool(*values):
-    for v in values:
-        if v not in _BOOL_VALUES:
-            return False
-    
-    return True
+    return all(v in _BOOL_VALUES for v in values)
 
 class ABNF(object):
     """
@@ -271,7 +260,7 @@ class ABNF(object):
         length = len(self.data)
         if length >= ABNF.LENGTH_63:
             raise ValueError("data is too long")
-        
+
         frame_header = chr(self.fin << 7
                            | self.rsv1 << 6 | self.rsv2 << 5 | self.rsv3 << 4
                            | self.opcode)
@@ -283,12 +272,11 @@ class ABNF(object):
         else:
             frame_header += chr(self.mask << 7 | 0x7f)
             frame_header += struct.pack("!Q", length)
-        
+
         if not self.mask:
             return frame_header + self.data
-        else:
-            mask_key = self.get_mask_key(4)
-            return frame_header + self._get_masked(mask_key)
+        mask_key = self.get_mask_key(4)
+        return frame_header + self._get_masked(mask_key)
 
     def _get_masked(self, mask_key):
         s = ABNF.mask(mask_key, self.data)
@@ -394,27 +382,27 @@ class WebSocket(object):
 
     def _handshake(self, host, port, resource, **options):
         sock = self.io_sock
-        headers = []
-        headers.append("GET %s HTTP/1.1" % resource)
-        headers.append("Upgrade: websocket")
-        headers.append("Connection: Upgrade")
-        if port == 80:
-            hostport = host
-        else:
-            hostport = "%s:%d" % (host, port)
-        headers.append("Host: %s" % hostport)
-        headers.append("Origin: %s" % hostport)
-   
+        headers = [
+            f"GET {resource} HTTP/1.1",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+        ]
+        hostport = host if port == 80 else "%s:%d" % (host, port)
+        headers.append(f"Host: {hostport}")
+        headers.append(f"Origin: {hostport}")
+
         key = _create_sec_websocket_key()
-        headers.append("Sec-WebSocket-Key: %s" % key)
-        headers.append("Sec-WebSocket-Protocol: chat, superchat")
-        headers.append("Sec-WebSocket-Version: %s" % VERSION)
+        headers.extend(
+            (
+                f"Sec-WebSocket-Key: {key}",
+                "Sec-WebSocket-Protocol: chat, superchat",
+                f"Sec-WebSocket-Version: {VERSION}",
+            )
+        )
         if "header" in options:
             headers.extend(options["header"])
 
-        headers.append("")
-        headers.append("")
-
+        headers.extend(("", ""))
         header_str = "\r\n".join(headers)
         sock.send(header_str)
         if traceEnabled:
@@ -447,8 +435,8 @@ class WebSocket(object):
         if not result:
             return False
         result = result.lower()
-        
-        value = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+        value = f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         hashed = base64.encodestring(hashlib.sha1(value).digest()).strip().lower()
         return hashed == result
 
@@ -457,7 +445,7 @@ class WebSocket(object):
         headers = {}
         if traceEnabled:
             logger.debug("--- response header ---")
-            
+
         while True:
             line = self._recv_line()
             if line == "\r\n":
@@ -470,15 +458,14 @@ class WebSocket(object):
                 status = int(status_info[1])
             else:
                 kv = line.split(":", 1)
-                if len(kv) == 2:
-                    key, value = kv
-                    headers[key.lower()] = value.strip().lower()
-                else:
+                if len(kv) != 2:
                     raise WebSocketException("Invalid header")
 
+                key, value = kv
+                headers[key.lower()] = value.strip().lower()
         if traceEnabled:
             logger.debug("-----------------------")
-        
+
         return status, headers    
     
     def send(self, payload, opcode = ABNF.OPCODE_TEXT):
@@ -497,7 +484,7 @@ class WebSocket(object):
         data = frame.format()
         self.io_sock.send(data)
         if traceEnabled:
-            logger.debug("send: " + repr(data))
+            logger.debug(f"send: {repr(data)}")
 
     def ping(self, payload = ""):
         """
@@ -535,7 +522,7 @@ class WebSocket(object):
             if not frame:
                 # handle error: 
                 # 'NoneType' object has no attribute 'opcode'
-                raise WebSocketException("Not a valid frame %s" % frame)
+                raise WebSocketException(f"Not a valid frame {frame}")
             elif frame.opcode in (ABNF.OPCODE_TEXT, ABNF.OPCODE_BINARY):
                 return (frame.opcode, frame.data)
             elif frame.opcode == ABNF.OPCODE_CLOSE:
@@ -572,19 +559,16 @@ class WebSocket(object):
             length_data = self._recv(8)
             length = struct.unpack("!Q", length_data)[0]
 
-        mask_key = ""
-        if mask:
-            mask_key = self._recv(4)
+        mask_key = self._recv(4) if mask else ""
         data = self._recv_strict(length)
         if traceEnabled:
             recieved = header_bytes + length_data + mask_key + data
-            logger.debug("recv: " + repr(recieved))
+            logger.debug(f"recv: {repr(recieved)}")
 
         if mask:
             data = ABNF.mask(mask_key, data)
-        
-        frame = ABNF(fin, rsv1, rsv2, rsv3, opcode, mask, data)
-        return frame
+
+        return ABNF(fin, rsv1, rsv2, rsv3, opcode, mask, data)
 
     def send_close(self, status = STATUS_NORMAL, reason = ""):
         """
@@ -619,7 +603,7 @@ class WebSocket(object):
                 try:
                     frame = self.recv_frame()
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.error("close status: " + repr(frame.data))
+                        logger.error(f"close status: {repr(frame.data)}")
                 except:
                     pass
                 self.sock.settimeout(timeout)
@@ -634,8 +618,7 @@ class WebSocket(object):
         self.io_sock = self.sock
         
     def _recv(self, bufsize):
-        bytes = self.io_sock.recv(bufsize)
-        return bytes
+        return self.io_sock.recv(bufsize)
 
     def _recv_strict(self, bufsize):
         remaining = bufsize
